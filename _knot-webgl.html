@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Animated Noise Rainbow Arc</title>
+<title>Rainbow Arc + Fog Layer</title>
 
 <style>
 html,body{
@@ -41,7 +41,7 @@ const CONFIG = {
   arcStart : -1.62,
   arcEnd   :  1.62,
 
-  arcHeight : 0.59518,
+  arcHeight : 0.69518,
 
   centerX : 0.5,
   centerY : 0.32,
@@ -51,11 +51,29 @@ const CONFIG = {
 
   alpha : 0.08,
 
-  // animation tuning
-  noiseStrength : 0.073,
-  spikeStrength  : 0.038,
-  speed          : 0.26
+  noiseStrength : 0.053,
+  spikeStrength  : 0.02,
+  speed          : 0.26,
 
+  //////////////////////////////////////////////////////
+  // 🌫️ FOG SYSTEM
+  //////////////////////////////////////////////////////
+
+  fogColor : [0.685, 0.685, 0.688], // slightly cold grey-blue
+
+  fogAlpha : 0.35,
+
+  fogHeight : 0.65, // 0 = bottom, 1 = top fade cutoff
+
+  fogDensity : 10.2,
+
+  fogSpeed : 0.095,
+
+  fogScale : 3.0,
+
+  fogPatchStrength : 0.6,
+
+  fogLayers : 3
 };
 
 //////////////////////////////////////////////////////
@@ -63,7 +81,6 @@ const CONFIG = {
 //////////////////////////////////////////////////////
 
 const canvas = document.getElementById("c");
-
 const gl = canvas.getContext("webgl", { alpha:true });
 
 gl.enable(gl.BLEND);
@@ -113,7 +130,23 @@ uniform float noiseStrength;
 uniform float spikeStrength;
 uniform float speed;
 
+//////////////////////////////////////////////////////
+// FOG UNIFORMS
+//////////////////////////////////////////////////////
+
+uniform vec3 fogColor;
+uniform float fogAlpha;
+uniform float fogHeight;
+uniform float fogDensity;
+uniform float fogSpeed;
+uniform float fogScale;
+uniform float fogPatchStrength;
+
 varying vec2 vUv;
+
+//////////////////////////////////////////////////////
+// NOISE
+//////////////////////////////////////////////////////
 
 float hash(vec2 p){
   return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453);
@@ -139,6 +172,10 @@ float band(float x, float c, float w){
   return smoothstep(w, 0.0, abs(x - c));
 }
 
+//////////////////////////////////////////////////////
+// MAIN
+//////////////////////////////////////////////////////
+
 void main(){
 
   vec2 uv = vUv;
@@ -156,14 +193,14 @@ void main(){
   float a = atan(p.y, p.x);
 
   //////////////////////////////////////////////////////
-  // 🌪️ RADIAL NOISE DISTORTION (KEY ADDITION)
+  // 🌈 RAINBOW DISTORTION
   //////////////////////////////////////////////////////
 
   float t = time * speed;
 
-  float n1 = noise(vec2(a * 2.0, t * 0.5));   // slow waves
-  float n2 = noise(vec2(a * 8.0, t * 1.2));   // mid turbulence
-  float n3 = pow(noise(vec2(a * 20.0, t * 2.0)), 6.0); // spikes
+  float n1 = noise(vec2(a * 2.0, t * 0.5));
+  float n2 = noise(vec2(a * 8.0, t * 1.2));
+  float n3 = pow(noise(vec2(a * 20.0, t * 2.0)), 8.0);
 
   float distortion =
       (n1 - 0.5) * noiseStrength +
@@ -173,7 +210,7 @@ void main(){
   r += distortion;
 
   //////////////////////////////////////////////////////
-  // ARC SHAPE
+  // ARC MASK
   //////////////////////////////////////////////////////
 
   float radius = arcHeight;
@@ -184,7 +221,7 @@ void main(){
       (1.0 - smoothstep(arcEnd - 0.25, arcEnd, a));
 
   //////////////////////////////////////////////////////
-  // ROYGBIV RADIAL BANDS
+  // ROYGBIV
   //////////////////////////////////////////////////////
 
   float R = radius + thickness * 0.005;
@@ -208,12 +245,42 @@ void main(){
 
   col *= arcMask;
 
-  gl_FragColor = vec4(col, alpha);
+  //////////////////////////////////////////////////////
+  // 🌫️ FOG LAYER (screen space)
+  //////////////////////////////////////////////////////
+
+  vec2 fogUV = uv * fogScale;
+
+  float wind = time * fogSpeed;
+
+  float f = 0.0;
+
+  // layered fog (cheap multi-octave)
+  f += noise(fogUV + vec2(wind, 0.0)) * 0.6;
+  f += noise(fogUV * 2.0 + vec2(wind * 1.5, 10.0)) * 0.3;
+  f += noise(fogUV * 4.0 + vec2(wind * 2.0, 20.0)) * 0.1;
+
+  f = pow(f, 2.0); // soften structure
+
+  // vertical fade (IMPORTANT)
+  float fogMask = smoothstep(fogHeight, 0.0, uv.y);
+
+  vec3 fog = fogColor * f * fogDensity * fogMask;
+
+  float fogA = fogAlpha * fogMask;
+
+  //////////////////////////////////////////////////////
+  // FINAL COMPOSITE
+  //////////////////////////////////////////////////////
+
+  vec3 finalCol = col + fog;
+
+  gl_FragColor = vec4(finalCol, alpha + fogA);
 }
 `;
 
 //////////////////////////////////////////////////////
-// COMPILE
+// COMPILE + RUN
 //////////////////////////////////////////////////////
 
 function compile(type, src){
@@ -230,10 +297,6 @@ gl.attachShader(program, compile(gl.FRAGMENT_SHADER, fs));
 
 gl.linkProgram(program);
 gl.useProgram(program);
-
-//////////////////////////////////////////////////////
-// QUAD
-//////////////////////////////////////////////////////
 
 const quad = gl.createBuffer();
 gl.bindBuffer(gl.ARRAY_BUFFER, quad);
@@ -271,8 +334,15 @@ const uSpikeStrength = gl.getUniformLocation(program, "spikeStrength");
 const uSpeed = gl.getUniformLocation(program, "speed");
 
 //////////////////////////////////////////////////////
-// LOOP
+// FOG UNIFORMS
 //////////////////////////////////////////////////////
+
+const uFogColor = gl.getUniformLocation(program, "fogColor");
+const uFogAlpha = gl.getUniformLocation(program, "fogAlpha");
+const uFogHeight = gl.getUniformLocation(program, "fogHeight");
+const uFogDensity = gl.getUniformLocation(program, "fogDensity");
+const uFogSpeed = gl.getUniformLocation(program, "fogSpeed");
+const uFogScale = gl.getUniformLocation(program, "fogScale");
 
 function draw(time){
 
@@ -296,6 +366,13 @@ function draw(time){
   gl.uniform1f(uNoiseStrength, CONFIG.noiseStrength);
   gl.uniform1f(uSpikeStrength, CONFIG.spikeStrength);
   gl.uniform1f(uSpeed, CONFIG.speed);
+
+  gl.uniform3fv(uFogColor, CONFIG.fogColor);
+  gl.uniform1f(uFogAlpha, CONFIG.fogAlpha);
+  gl.uniform1f(uFogHeight, CONFIG.fogHeight);
+  gl.uniform1f(uFogDensity, CONFIG.fogDensity);
+  gl.uniform1f(uFogSpeed, CONFIG.fogSpeed);
+  gl.uniform1f(uFogScale, CONFIG.fogScale);
 
   gl.drawArrays(gl.TRIANGLES, 0, 6);
 
