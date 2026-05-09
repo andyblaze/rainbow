@@ -1,0 +1,19 @@
+html,body{
+  margin:0;
+  overflow:hidden;
+  background:#c4c4c4;
+}
+
+body{
+  background:
+    transparent url(bgr.jpg?lk)
+    0 0 no-repeat;
+  background-size:cover;
+}
+
+canvas{
+  width:100vw;
+  height:100vh;
+  display:block;
+  background-color:transparent;
+}
